@@ -1,0 +1,28 @@
+# Node
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+
+# Java
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Env
+.env
+.env.local

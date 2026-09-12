@@ -1,0 +1,20 @@
+{
+  "name": "workflow-load-test",
+  "version": "1.0.0",
+  "description": "Load test harness for the workflow automation engine",
+  "main": "dist/load-test.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "ts-node load-test.ts",
+    "test": "ts-node load-test.ts"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "p-limit": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}
