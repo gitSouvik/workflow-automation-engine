@@ -54,6 +54,12 @@ public class WorkflowInstance {
     @OneToMany(mappedBy = "workflowInstance", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<TaskInstance> taskInstances = new ArrayList<>();
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "workflow_variables", joinColumns = @JoinColumn(name = "workflow_instance_id"))
+    @MapKeyColumn(name = "var_name")
+    @Column(name = "var_value", length = 1000)
+    private java.util.Map<String, String> variables = new java.util.HashMap<>();
+
     public WorkflowInstance() {}
 
     public WorkflowInstance(String definitionId, String definitionName, String title, String initiatorId) {
@@ -82,4 +88,6 @@ public class WorkflowInstance {
     public void setVersion(Long version) { this.version = version; }
     public List<TaskInstance> getTaskInstances() { return taskInstances; }
     public void setTaskInstances(List<TaskInstance> taskInstances) { this.taskInstances = taskInstances; }
+    public java.util.Map<String, String> getVariables() { return variables; }
+    public void setVariables(java.util.Map<String, String> variables) { this.variables = variables; }
 }

@@ -4,6 +4,9 @@ import com.workflow.domain.*;
 import com.workflow.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
+import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -14,9 +17,7 @@ import java.util.stream.Collectors;
 
 /**
  * Core workflow state machine.
- * All state is DB-driven — no in-memory state, safe across crashes.
- *
- * READINESS RULE: A task becomes READY iff ALL its predecessors are APPROVED.
+ * Supports fully generic arbitrary graph shapes (DAGs).
  */
 @Service
 public class WorkflowStateMachine {
@@ -26,6 +27,7 @@ public class WorkflowStateMachine {
     private final TaskInstanceRepository taskInstanceRepo;
     private final WorkflowDefinitionRepository definitionRepo;
     private final WorkflowInstanceRepository instanceRepo;
+    private final ExpressionParser expressionParser = new SpelExpressionParser();
 
     public WorkflowStateMachine(TaskInstanceRepository taskInstanceRepo,
                                  WorkflowDefinitionRepository definitionRepo,
@@ -41,62 +43,144 @@ public class WorkflowStateMachine {
             .orElseThrow(() -> new IllegalStateException("Definition not found: " + instance.getDefinitionId()));
 
         List<TaskInstance> allTasks = taskInstanceRepo.findByWorkflowInstanceId(instance.getId());
-        Map<String, TaskStatus> taskStatusMap = allTasks.stream()
-            .collect(Collectors.toMap(TaskInstance::getTaskKey, TaskInstance::getStatus));
+        TaskInstance completedTask = allTasks.stream()
+            .filter(t -> t.getTaskKey().equals(completedTaskKey))
+            .findFirst().orElseThrow();
 
-        Map<String, Set<String>> predecessors = buildPredecessorMap(definition);
-
-        List<String> successors = definition.getDependencies().stream()
-            .filter(d -> d.getFromTaskKey().equals(completedTaskKey))
-            .map(TaskDependency::getToTaskKey)
-            .toList();
-
-        TaskStatus completedStatus = taskStatusMap.get(completedTaskKey);
-
-        for (String successorKey : successors) {
-            TaskInstance successor = allTasks.stream()
-                .filter(t -> t.getTaskKey().equals(successorKey))
-                .findFirst().orElse(null);
-
-            if (successor == null || isTerminal(successor.getStatus())) continue;
-
-            if (completedStatus == TaskStatus.REJECTED) {
-                log.info("[{}] Task '{}' rejected → cascading SKIP to '{}'", instance.getId(), completedTaskKey, successorKey);
-                successor.setStatus(TaskStatus.SKIPPED);
-                taskInstanceRepo.save(successor);
-                advanceWorkflow(instance, successorKey);
-            } else if (completedStatus == TaskStatus.APPROVED) {
-                Set<String> preds = predecessors.getOrDefault(successorKey, Set.of());
-                boolean allPredsApproved = preds.stream().allMatch(p -> taskStatusMap.get(p) == TaskStatus.APPROVED);
-                if (allPredsApproved && successor.getStatus() == TaskStatus.PENDING) {
-                    log.info("[{}] All predecessors of '{}' approved → READY", instance.getId(), successorKey);
-                    successor.setStatus(TaskStatus.READY);
-                    taskInstanceRepo.save(successor);
+        if (completedTask.getStatus() == TaskStatus.APPROVED) {
+            for (TaskDependency dep : definition.getDependencies()) {
+                if (dep.getFromTaskKey().equals(completedTaskKey)) {
+                    if (dep.getConditionExpression() != null && !dep.getConditionExpression().trim().isEmpty()) {
+                        boolean edgePassed = evaluateCondition(dep.getConditionExpression(), instance.getVariables());
+                        if (!edgePassed) {
+                            String successorKey = dep.getToTaskKey();
+                            TaskInstance successor = allTasks.stream()
+                                .filter(t -> t.getTaskKey().equals(successorKey))
+                                .findFirst().orElse(null);
+                            if (successor != null && !isTerminal(successor.getStatus())) {
+                                log.info("[{}] Edge condition '{}' from '{}' evaluated to false. Skipping successor '{}'", 
+                                    instance.getId(), dep.getConditionExpression(), completedTaskKey, successorKey);
+                                successor.setStatus(TaskStatus.SKIPPED);
+                                taskInstanceRepo.save(successor);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        List<TaskInstance> refreshed = taskInstanceRepo.findByWorkflowInstanceId(instance.getId());
-        checkWorkflowCompletion(instance, refreshed);
+        recomputeReadiness(instance);
     }
 
     @Transactional
     public void recomputeReadiness(WorkflowInstance instance) {
         WorkflowDefinition definition = definitionRepo.findById(instance.getDefinitionId()).orElseThrow();
-        List<TaskInstance> allTasks = taskInstanceRepo.findByWorkflowInstanceId(instance.getId());
-        Map<String, TaskStatus> statusMap = allTasks.stream()
-            .collect(Collectors.toMap(TaskInstance::getTaskKey, TaskInstance::getStatus));
         Map<String, Set<String>> predecessors = buildPredecessorMap(definition);
 
-        for (TaskInstance task : allTasks) {
-            if (task.getStatus() != TaskStatus.PENDING) continue;
-            Set<String> preds = predecessors.getOrDefault(task.getTaskKey(), Set.of());
-            boolean allApproved = preds.stream().allMatch(p -> statusMap.get(p) == TaskStatus.APPROVED);
-            if (allApproved) {
-                log.info("[{}] Recompute: marking '{}' as READY", instance.getId(), task.getTaskKey());
-                task.setStatus(TaskStatus.READY);
-                taskInstanceRepo.save(task);
+        boolean changed;
+        do {
+            changed = false;
+            List<TaskInstance> allTasks = taskInstanceRepo.findByWorkflowInstanceId(instance.getId());
+            Map<String, TaskStatus> statusMap = allTasks.stream()
+                .collect(Collectors.toMap(TaskInstance::getTaskKey, TaskInstance::getStatus));
+
+            for (TaskInstance task : allTasks) {
+                if (isTerminal(task.getStatus()) || task.getStatus() == TaskStatus.READY || task.getStatus() == TaskStatus.IN_PROGRESS) {
+                    continue; // Only check PENDING
+                }
+                
+                Set<String> preds = predecessors.getOrDefault(task.getTaskKey(), Set.of());
+                
+                boolean allPredsTerminal = true;
+                boolean allPredsSkipped = true;
+                boolean anyPredRejected = false;
+                boolean anyPredApproved = false;
+                
+                for (String p : preds) {
+                    TaskStatus ps = statusMap.get(p);
+                    if (ps == null) continue;
+                    if (!isTerminal(ps)) {
+                        allPredsTerminal = false;
+                        break;
+                    }
+                    if (ps != TaskStatus.SKIPPED) allPredsSkipped = false;
+                    if (ps == TaskStatus.REJECTED) anyPredRejected = true;
+                    if (ps == TaskStatus.APPROVED) anyPredApproved = true;
+                }
+
+                if (!preds.isEmpty() && allPredsTerminal) {
+                    if (anyPredRejected) {
+                        task.setStatus(TaskStatus.SKIPPED);
+                        taskInstanceRepo.save(task);
+                        changed = true;
+                    } else if (allPredsSkipped) {
+                        task.setStatus(TaskStatus.SKIPPED);
+                        taskInstanceRepo.save(task);
+                        changed = true;
+                    } else if (anyPredApproved) {
+                        task.setStatus(TaskStatus.READY);
+                        taskInstanceRepo.save(task);
+                        changed = true;
+                        autoExecuteIfApplicable(instance, task, definition);
+                    }
+                } else if (preds.isEmpty()) {
+                    task.setStatus(TaskStatus.READY);
+                    taskInstanceRepo.save(task);
+                    changed = true;
+                    autoExecuteIfApplicable(instance, task, definition);
+                }
             }
+        } while (changed);
+        
+        List<TaskInstance> refreshed = taskInstanceRepo.findByWorkflowInstanceId(instance.getId());
+        checkWorkflowCompletion(instance, refreshed);
+    }
+
+    private void autoExecuteIfApplicable(WorkflowInstance instance, TaskInstance task, WorkflowDefinition definition) {
+        TaskDefinition def = definition.getTasks().stream()
+            .filter(t -> t.getTaskKey().equals(task.getTaskKey()))
+            .findFirst().orElse(null);
+            
+        if (def != null && def.getNodeType() == NodeType.CONDITIONAL) {
+            log.info("[{}] Auto-executing CONDITIONAL node '{}'", instance.getId(), task.getTaskKey());
+            task.setStatus(TaskStatus.APPROVED);
+            taskInstanceRepo.save(task);
+            
+            // Immediately evaluate conditional edges for this auto-approved node
+            List<TaskInstance> allTasks = taskInstanceRepo.findByWorkflowInstanceId(instance.getId());
+            for (TaskDependency dep : definition.getDependencies()) {
+                if (dep.getFromTaskKey().equals(task.getTaskKey())) {
+                    if (dep.getConditionExpression() != null && !dep.getConditionExpression().trim().isEmpty()) {
+                        boolean edgePassed = evaluateCondition(dep.getConditionExpression(), instance.getVariables());
+                        if (!edgePassed) {
+                            String successorKey = dep.getToTaskKey();
+                            TaskInstance successor = allTasks.stream()
+                                .filter(t -> t.getTaskKey().equals(successorKey))
+                                .findFirst().orElse(null);
+                            if (successor != null && !isTerminal(successor.getStatus())) {
+                                log.info("[{}] Edge condition '{}' from '{}' evaluated to false. Skipping successor '{}'", 
+                                    instance.getId(), dep.getConditionExpression(), task.getTaskKey(), successorKey);
+                                successor.setStatus(TaskStatus.SKIPPED);
+                                taskInstanceRepo.save(successor);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean evaluateCondition(String expression, Map<String, String> variables) {
+        try {
+            StandardEvaluationContext context = new StandardEvaluationContext();
+            if (variables != null) {
+                variables.forEach(context::setVariable);
+            }
+            Boolean result = expressionParser.parseExpression(expression).getValue(context, Boolean.class);
+            return result != null && result;
+        } catch (Exception e) {
+            log.error("Failed to evaluate SpEL expression: {}", expression, e);
+            return false;
         }
     }
 

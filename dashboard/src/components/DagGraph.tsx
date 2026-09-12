@@ -31,11 +31,13 @@ interface DefinitionTask {
   name: string;
   assigneeRole: string;
   displayOrder?: number;
+  nodeType?: string;
 }
 
 interface DefinitionDependency {
   fromTaskKey: string;
   toTaskKey: string;
+  conditionExpression?: string;
 }
 
 interface WorkflowDefinition {
@@ -55,6 +57,7 @@ interface Node2D {
   y: number;
   radius: number;
   orderNumber: number;
+  nodeType: string;
 }
 
 interface DagGraphProps {
@@ -82,9 +85,9 @@ const STATUS_THEMES: Record<string, { fill: string; stroke: string; glow: string
   APPROVED: { fill: '#3fb950', stroke: '#2ea043', glow: 'rgba(63, 185, 80, 0.35)', text: '#3fb950' },
   IN_PROGRESS: { fill: '#e3b341', stroke: '#d29922', glow: 'rgba(227, 179, 65, 0.55)', text: '#e3b341' },
   READY: { fill: '#38bdf8', stroke: '#0284c7', glow: 'rgba(56, 189, 248, 0.35)', text: '#38bdf8' },
-  PENDING: { fill: '#6e7681', stroke: '#484f58', glow: 'transparent', text: '#8b949e' },
+  PENDING: { fill: '#a855f7', stroke: '#9333ea', glow: 'rgba(168, 85, 247, 0.35)', text: '#d8b4fe' },
   REJECTED: { fill: '#f85149', stroke: '#da3633', glow: 'rgba(248, 81, 73, 0.45)', text: '#f85149' },
-  SKIPPED: { fill: '#30363d', stroke: '#21262d', glow: 'transparent', text: '#656c76' }
+  SKIPPED: { fill: '#f43f5e', stroke: '#e11d48', glow: 'rgba(244, 63, 94, 0.35)', text: '#fda4af' }
 };
 
 export default function DagGraph({ instances, selectedInstance, onSelectInstance }: DagGraphProps) {
@@ -92,7 +95,7 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
   const containerRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [definition, setDefinition] = useState<WorkflowDefinition | null>(null);
+  const [definitions, setDefinitions] = useState<WorkflowDefinition[]>([]);
   const [hoveredNode, setHoveredNode] = useState<Node2D | null>(null);
   const [selectedTaskKey, setSelectedTaskKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -127,31 +130,37 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetch Workflow Definition
   useEffect(() => {
     let isMounted = true;
     axios.get<WorkflowDefinition[]>(`${API_BASE}/api/definitions`)
       .then(res => {
-        if (isMounted && res.data && res.data.length > 0) {
-          setDefinition(res.data[0]);
+        if (isMounted && res.data) {
+          setDefinitions(res.data);
         }
       })
       .catch(() => {
-        setDefinition({
+        setDefinitions([{
           id: 'default',
           name: 'Load Test Workflow',
           description: '4-step approval flow with parallel reviews',
           tasks: DEFAULT_TASKS,
           dependencies: DEFAULT_DEPS
-        });
+        }]);
       });
     return () => { isMounted = false; };
   }, []);
 
-  const activeTasks = definition?.tasks || DEFAULT_TASKS;
-  const activeDeps = definition?.dependencies || DEFAULT_DEPS;
-
   const currentInstance = selectedInstance || (instances.length > 0 ? instances[0] : null);
+  
+  const activeDefinition = useMemo(() => {
+    if (currentInstance?.definitionId) {
+      return definitions.find(d => d.id === currentInstance.definitionId) || definitions[0];
+    }
+    return definitions[0];
+  }, [definitions, currentInstance]);
+
+  const activeTasks = activeDefinition?.tasks || DEFAULT_TASKS;
+  const activeDeps = activeDefinition?.dependencies || DEFAULT_DEPS;
 
   // Filter instances by search
   const filteredInstances = useMemo(() => {
@@ -253,7 +262,8 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
           x,
           y,
           radius: 20,
-          orderNumber: orderCounter++
+          orderNumber: orderCounter++,
+          nodeType: t.nodeType || 'APPROVAL'
         });
       });
     });
@@ -276,8 +286,8 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
       if (canvas.width !== Math.floor(displayWidth * dpr) || canvas.height !== Math.floor(displayHeight * dpr)) {
         canvas.width = Math.floor(displayWidth * dpr);
         canvas.height = Math.floor(displayHeight * dpr);
-        canvas.style.width = `${displayWidth}px`;
-        canvas.style.height = `${displayHeight}px`;
+        canvas.style.width = `100%`;
+        canvas.style.height = `100%`;
       }
 
       const ctx = canvas.getContext('2d');
@@ -389,6 +399,25 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
         ctx.closePath();
         ctx.fill();
 
+        if (dep.conditionExpression) {
+          ctx.font = `500 ${Math.max(7, Math.round(8 * curZoom))}px 'JetBrains Mono', monospace`;
+          ctx.fillStyle = '#8b949e';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          const mt = 0.5;
+          const mx = Math.pow(1 - mt, 3) * from.x +
+                     3 * Math.pow(1 - mt, 2) * mt * cp1x +
+                     3 * (1 - mt) * Math.pow(mt, 2) * cp2x +
+                     Math.pow(mt, 3) * to.x;
+          const my = Math.pow(1 - mt, 3) * from.y +
+                     3 * Math.pow(1 - mt, 2) * mt * cp1y +
+                     3 * (1 - mt) * Math.pow(mt, 2) * cp2y +
+                     Math.pow(mt, 3) * to.y;
+                     
+          ctx.fillText(dep.conditionExpression, mx, my - 10 * curZoom);
+        }
+
         if (isApproved || isProgress) {
           const pt = particleOffsetRef.current;
           const px = Math.pow(1 - pt, 3) * from.x +
@@ -422,43 +451,47 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
 
         ctx.save();
 
-        if (isSelected || theme.glow !== 'transparent') {
+        if (isSelected) {
           ctx.beginPath();
-          ctx.arc(pos.x, pos.y, r * 1.5, 0, Math.PI * 2);
-          ctx.fillStyle = isSelected ? 'rgba(88, 166, 255, 0.4)' : theme.glow;
+          if (node.nodeType === 'CONDITIONAL') {
+            ctx.moveTo(pos.x, pos.y - r * 1.3);
+            ctx.lineTo(pos.x + r * 1.3, pos.y);
+            ctx.lineTo(pos.x, pos.y + r * 1.3);
+            ctx.lineTo(pos.x - r * 1.3, pos.y);
+            ctx.closePath();
+          } else {
+            ctx.arc(pos.x, pos.y, r * 1.3, 0, Math.PI * 2);
+          }
+          ctx.fillStyle = 'rgba(88, 166, 255, 0.4)';
           ctx.fill();
         }
 
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = '#161b22';
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r * 0.88, 0, Math.PI * 2);
+        if (node.nodeType === 'CONDITIONAL') {
+          ctx.moveTo(pos.x, pos.y - r);
+          ctx.lineTo(pos.x + r, pos.y);
+          ctx.lineTo(pos.x, pos.y + r);
+          ctx.lineTo(pos.x - r, pos.y);
+          ctx.closePath();
+        } else {
+          ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        }
         ctx.fillStyle = theme.fill;
         ctx.fill();
 
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-        ctx.lineWidth = isSelected ? 2.8 : 2.0;
+        ctx.lineWidth = isSelected ? 2.8 : 1.5;
         ctx.strokeStyle = isSelected ? '#58a6ff' : theme.stroke;
         ctx.stroke();
 
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r * 0.35, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-
-        ctx.font = `600 ${Math.max(10, Math.round(11 * curZoom))}px Inter, sans-serif`;
+        ctx.font = `500 ${Math.max(8, Math.round(9 * curZoom))}px Inter, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.fillStyle = '#f0f6fc';
-        ctx.fillText(node.name, pos.x, pos.y + r + 5);
+        ctx.fillText(node.name, pos.x, pos.y + r + 6);
 
-        ctx.font = `500 ${Math.max(8.5, Math.round(9.5 * curZoom))}px 'JetBrains Mono', monospace`;
+        ctx.font = `500 ${Math.max(7, Math.round(7.5 * curZoom))}px 'JetBrains Mono', monospace`;
         ctx.fillStyle = '#8b949e';
-        ctx.fillText(node.role, pos.x, pos.y + r + 20);
+        ctx.fillText(node.role, pos.x, pos.y + r + 18);
 
         ctx.restore();
       });
@@ -551,37 +584,30 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
       {/* COMPACT SLIM TOP BAR WITH GITHUB-STYLE SEARCH BAR */}
       <div className="dag-graph-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <div className="dag-red-box-indicator">
-            <span style={{ display: 'inline-block', width: 5, height: 5, borderRadius: '50%', background: '#58a6ff' }} />
-          </div>
           <div style={{ minWidth: 0 }}>
             <div className="dag-title">
-              Graph
+              {currentInstance ? currentInstance.title : 'Template Graph'}
               {currentInstance && (
                 <span className={`status-badge badge-${currentInstance.status.toLowerCase()}`} style={{ marginLeft: 5, padding: '1px 5px', fontSize: 9.5 }}>
                   {currentInstance.status}
                 </span>
               )}
             </div>
-            <div className="dag-subtitle" title={currentInstance ? currentInstance.title : 'Template Graph'}>
-              {currentInstance ? currentInstance.title : 'Template Graph'}
+            <div className="dag-subtitle">
+              {currentInstance ? `Instance ID: ${currentInstance.id}` : ''}
             </div>
           </div>
-        </div>
 
-        {/* GitHub Search Bar + Instance Selector + Compact Zoom Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          {/* GitHub Search Bar */}
-          <div className="github-search-bar" title="Search instances or tasks (Press / to focus)">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7d8590" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="table-search-box" title="Search instances or tasks (Press / to focus)" style={{ marginLeft: 16 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#656c76" strokeWidth="2">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
             <input
               ref={searchInputRef}
               type="text"
-              className="github-search-input"
-              placeholder="Type / to search..."
+              className="table-search-input"
+              placeholder="Filter tasks..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
             />
@@ -600,25 +626,10 @@ export default function DagGraph({ instances, selectedInstance, onSelectInstance
               <kbd className="github-search-kbd">/</kbd>
             )}
           </div>
+        </div>
 
-          {filteredInstances.length > 0 && (
-            <select
-              className="dag-instance-select"
-              value={currentInstance?.id || ''}
-              onChange={(e) => {
-                const found = instances.find(inst => inst.id === e.target.value);
-                if (found) onSelectInstance(found);
-              }}
-              title="Select workflow instance"
-            >
-              {filteredInstances.slice(0, 30).map(inst => (
-                <option key={inst.id} value={inst.id}>
-                  {inst.title.length > 15 ? `${inst.title.slice(0, 15)}…` : inst.title}
-                </option>
-              ))}
-            </select>
-          )}
-
+        {/* Zoom Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <button
             className="filter-pill"
             onClick={handleResetView}

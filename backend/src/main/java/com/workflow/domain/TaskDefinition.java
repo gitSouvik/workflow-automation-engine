@@ -31,6 +31,10 @@ public class TaskDefinition {
     @Column(nullable = false)
     private String assigneeRole;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private NodeType nodeType = NodeType.APPROVAL;
+
     private int displayOrder;
 
     public TaskDefinition() {}
@@ -56,4 +60,6 @@ public class TaskDefinition {
     public void setAssigneeRole(String assigneeRole) { this.assigneeRole = assigneeRole; }
     public int getDisplayOrder() { return displayOrder; }
     public void setDisplayOrder(int displayOrder) { this.displayOrder = displayOrder; }
+    public NodeType getNodeType() { return nodeType; }
+    public void setNodeType(NodeType nodeType) { this.nodeType = nodeType; }
 }

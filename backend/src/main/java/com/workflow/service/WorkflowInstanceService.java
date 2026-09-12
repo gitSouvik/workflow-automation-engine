@@ -40,6 +40,11 @@ public class WorkflowInstanceService {
 
         WorkflowInstance instance = new WorkflowInstance(
             definition.getId(), definition.getName(), request.getTitle(), request.getInitiatorId());
+        
+        if (request.getVariables() != null) {
+            instance.getVariables().putAll(request.getVariables());
+        }
+        
         instance = instanceRepo.save(instance);
 
         for (TaskDefinition taskDef : definition.getTasks()) {

@@ -25,6 +25,9 @@ public class TaskDependency {
     @Column(name = "to_task_key", nullable = false)
     private String toTaskKey;
 
+    @Column(length = 500)
+    private String conditionExpression;
+
     public TaskDependency() {}
 
     public TaskDependency(WorkflowDefinition def, String fromTaskKey, String toTaskKey) {
@@ -41,4 +44,6 @@ public class TaskDependency {
     public void setFromTaskKey(String fromTaskKey) { this.fromTaskKey = fromTaskKey; }
     public String getToTaskKey() { return toTaskKey; }
     public void setToTaskKey(String toTaskKey) { this.toTaskKey = toTaskKey; }
+    public String getConditionExpression() { return conditionExpression; }
+    public void setConditionExpression(String conditionExpression) { this.conditionExpression = conditionExpression; }
 }

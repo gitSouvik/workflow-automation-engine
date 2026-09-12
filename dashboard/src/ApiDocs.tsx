@@ -29,6 +29,11 @@ const DOCS: DocSection[] = [
           The <strong>Workflow Engine</strong> is an enterprise-grade orchestration platform that executes business approval pipelines as <strong>Directed Acyclic Graphs (DAGs)</strong>.
         </p>
 
+        <div className="docs-section-title" style={{ marginTop: 24, marginBottom: 12 }}>What it does</div>
+        <p className="docs-description">
+          The Workflow Automation Engine allows teams to define, execute, and monitor distributed business processes (workflows). Instead of hardcoding linear chains, users can define generic DAGs representing dependencies between tasks. The engine calculates "readiness" at runtime, only waking up downstream tasks once their dependencies are resolved. It supports conditional branching via Spring Expression Language (SpEL) on edges, N-way fan-outs, and N-way joins, and robust optimistic concurrency control for safe multi-actor approvals.
+        </p>
+
         {/* Visual DAG Flow Diagram */}
         <div style={{
           background: 'var(--bg-surface)',
@@ -102,6 +107,24 @@ const DOCS: DocSection[] = [
             <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Task Instance</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>A specific step in the DAG. Progresses through <code>PENDING to READY to IN_PROGRESS to APPROVED/REJECTED</code>.</div>
           </div>
+        </div>
+
+        <div className="docs-section-title" style={{ marginTop: 32, marginBottom: 12 }}>Getting Started</div>
+        <div style={{ background: '#0d1117', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
+          <div style={{ fontWeight: 600, color: 'var(--accent-blue)', marginBottom: 8, fontSize: 13 }}>1. Run the Backend (Spring Boot)</div>
+          <pre style={{ margin: 0, padding: '10px', background: '#161b22', borderRadius: '4px', fontSize: 12, color: 'var(--text-secondary)' }}>
+<code>cd backend
+mvn clean package -DskipTests
+mvn spring-boot:run</code>
+          </pre>
+          
+          <div style={{ fontWeight: 600, color: 'var(--accent-purple)', marginTop: 20, marginBottom: 8, fontSize: 13 }}>2. Run the Dashboard (React/Vite)</div>
+          <pre style={{ margin: 0, padding: '10px', background: '#161b22', borderRadius: '4px', fontSize: 12, color: 'var(--text-secondary)' }}>
+<code>cd dashboard
+npm install
+npm run dev</code>
+          </pre>
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>Navigate to <code>http://localhost:5173</code> to access the interactive dashboard.</div>
         </div>
       </div>
     )

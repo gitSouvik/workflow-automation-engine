@@ -3,7 +3,6 @@ package com.workflow.service;
 import com.workflow.api.dto.*;
 import com.workflow.domain.*;
 import com.workflow.repository.*;
-import com.workflow.service.DagCycleDetector.CycleDetectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,11 +18,11 @@ public class WorkflowDefinitionService {
     private static final Logger log = LoggerFactory.getLogger(WorkflowDefinitionService.class);
 
     private final WorkflowDefinitionRepository definitionRepo;
-    private final DagCycleDetector cycleDetector;
+    private final WorkflowValidator workflowValidator;
 
-    public WorkflowDefinitionService(WorkflowDefinitionRepository definitionRepo, DagCycleDetector cycleDetector) {
+    public WorkflowDefinitionService(WorkflowDefinitionRepository definitionRepo, WorkflowValidator workflowValidator) {
         this.definitionRepo = definitionRepo;
-        this.cycleDetector = cycleDetector;
+        this.workflowValidator = workflowValidator;
     }
 
     @Transactional
@@ -39,22 +38,24 @@ public class WorkflowDefinitionService {
             TaskDefinition task = new TaskDefinition(definition, taskReq.getTaskKey(), taskReq.getName(), taskReq.getAssigneeRole());
             task.setDescription(taskReq.getDescription());
             task.setDisplayOrder(taskReq.getDisplayOrder());
+            if (taskReq.getNodeType() != null) {
+                task.setNodeType(taskReq.getNodeType());
+            }
             definition.getTasks().add(task);
         }
 
         for (DependencyRequest depReq : request.getDependencies()) {
             TaskDependency dep = new TaskDependency(definition, depReq.getFromTaskKey(), depReq.getToTaskKey());
+            dep.setConditionExpression(depReq.getConditionExpression());
             definition.getDependencies().add(dep);
         }
 
-        // CYCLE DETECTION — validate before persisting
+        // VALIDATION — cycle and orphan detection
         try {
-            List<String> order = cycleDetector.validateAndSort(taskKeys, definition.getDependencies());
-            log.info("Workflow definition '{}' validated. Topological order: {}", definition.getName(), order);
-        } catch (CycleDetectedException e) {
-            throw new InvalidDagException("Workflow definition contains a cycle: " + e.getMessage());
+            workflowValidator.validate(definition);
+            log.info("Workflow definition '{}' validated successfully.", definition.getName());
         } catch (IllegalArgumentException e) {
-            throw new InvalidDagException("Invalid DAG: " + e.getMessage());
+            throw new InvalidDagException(e.getMessage());
         }
 
         return definitionRepo.save(definition);

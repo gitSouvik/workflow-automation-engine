@@ -9,6 +9,7 @@ public class StartWorkflowRequest {
     private String title;
     @NotBlank
     private String initiatorId;
+    private java.util.Map<String, String> variables;
 
     public String getDefinitionId() { return definitionId; }
     public void setDefinitionId(String definitionId) { this.definitionId = definitionId; }
@@ -16,4 +17,6 @@ public class StartWorkflowRequest {
     public void setTitle(String title) { this.title = title; }
     public String getInitiatorId() { return initiatorId; }
     public void setInitiatorId(String initiatorId) { this.initiatorId = initiatorId; }
+    public java.util.Map<String, String> getVariables() { return variables; }
+    public void setVariables(java.util.Map<String, String> variables) { this.variables = variables; }
 }

@@ -32,6 +32,7 @@ interface LatencyPoint {
 interface WorkflowInstance {
   id: string
   title: string
+  definitionId: string
   definitionName: string
   initiatorId: string
   status: 'RUNNING' | 'COMPLETED' | 'REJECTED' | 'FAILED'
@@ -298,12 +299,16 @@ export default function App() {
       <main className="dashboard-content">
         {currentView === 'dag-graph' ? (
           /* DEDICATED 2D DAG GRAPH PAGE */
-          <DagGraph
-            instances={instances}
-            selectedInstance={selectedInstance}
-            onSelectInstance={handleSelectInstance}
-            onBackToDashboard={() => setCurrentView('dashboard')}
-          />
+          <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+              <DagGraph
+                instances={instances}
+                selectedInstance={selectedInstance}
+                onSelectInstance={handleSelectInstance}
+                onBackToDashboard={() => setCurrentView('dashboard')}
+              />
+            </div>
+          </div>
         ) : currentView === 'api-docs' ? (
           <ApiDocs />
         ) : (
@@ -374,48 +379,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* ROW 2: Step Latency Over Time (single full-width row) */}
-            <div className="glass-card">
-              <div className="card-header">
-                <span className="card-title">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                  </svg>
-                  Step Latency Over Time
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Real-time SSE (Last 30 snapshots)</span>
-              </div>
-              <div className="card-body" style={{ height: 210 }}>
-                {latencyHistory.length === 0 ? (
-                  <div className="loading-state" style={{ height: 160 }}>
-                    <div className="spinner" />
-                    <span>Awaiting metrics stream...</span>
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={latencyHistory} margin={{ top: 8, right: 8, left: -10, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="p50g" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#58a6ff" stopOpacity={0.25}/>
-                          <stop offset="95%" stopColor="#58a6ff" stopOpacity={0.0}/>
-                        </linearGradient>
-                        <linearGradient id="p99g" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#a371f7" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#a371f7" stopOpacity={0.0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="t" hide />
-                      <YAxis tick={{ fill: '#656c76', fontSize: 11 }} unit="ms" width={45} axisLine={false} tickLine={false} />
-                      <Tooltip content={<LatencyTooltip />} />
-                      <Area type="monotone" dataKey="p50" name="p50" stroke="#58a6ff" fill="url(#p50g)" strokeWidth={1.8} dot={false} />
-                      <Area type="monotone" dataKey="p99" name="p99" stroke="#a371f7" fill="url(#p99g)" strokeWidth={1.8} dot={false} />
-                      <Legend wrapperStyle={{ fontSize: 11, color: '#8b949e', paddingTop: 4 }} />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
+
 
             {/* ROW 3: In-Flight Instances Table (single full-width row with GRAPH SYMBOL on each) */}
             <div className="glass-card">
